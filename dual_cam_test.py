@@ -2,6 +2,28 @@
 import cv2
 import numpy as np
 from picamera2 import Picamera2
+from mappings import KEY_MAP, UP_ROW, DOWN_ROW, SIDE
+
+def get_key(finger_id, dx, dz):
+    if finger_id not in KEY_MAP:
+        return None
+    mapping = KEY_MAP[finger_id]
+    if finger_id == 2:
+        v_zone = "home"
+        if dz > UP_ROW: v_zone = "up"
+        elif dz < DOWN_ROW: v_zone = "down"
+        if dx > -SIDE:
+            if v_zone == "home" : return mapping.get("right")
+            else: return mapping.get(f"{v_zone}-right")
+        else:
+            return mapping.get(v_zone)
+    else:
+        if dz > UP_ROW:
+            return mapping.get("up")
+        elif dz < DOWN_ROW:
+            return mapping.get("down")
+        else:
+            return mapping.get("home")
 
 def find_light(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -28,7 +50,8 @@ def find_light(frame):
 
 def get3d(uL, vL, uR, vR):
     disparity = uL-uR
-    print(f"Shift: {disparity} pixels")
+    if disparity == 0:
+        disparity += 0.001
     lp = np.array([[uL], [vL]])
     rp = np.array([[uR], [vR]])
     # triangulate function
@@ -41,7 +64,7 @@ cam0 = Picamera2(0)
 cam1 = Picamera2(1)
 
 # constants!!!
-B = 44.0
+B = 25.0
 f = 530.0
 Cx, Cy = 320, 240
 
@@ -72,11 +95,16 @@ try:
     while True:
         frame0 = cam0.capture_array()
         frame1 = cam1.capture_array()
+        
+        # Flip the cameras
+        frame0 = cv2.flip(frame0, -1)
+        frame1 = cv2.flip(frame1, -1)
        
         left_pix = find_light(frame0)
         right_pix = find_light(frame1)
         num_visible = min(len(left_pix), len(right_pix))
         text = "not calibrated yet"
+        cf = [""] * 5
         for i in range(num_visible):
             uL, vL = left_pix[i]
             uR, vR = right_pix[i]
@@ -90,17 +118,19 @@ try:
             if home_pos[i]:
                 dX, dY, dZ = float(X-home_pos[i][0]), float(Y-home_pos[i][1]), float(Z-home_pos[i][2])
                 deltas[i] = (dX, dZ)
+                key_to_press = get_key(i, dX, dZ)
+                cf[i] = key_to_press
                 '''text = f"MOVE: dX:{dX} dY:{dY} dZ:{dZ}"
                 if dX>threshold: print("RIGHT")
                 elif dX<-threshold: print("LEFT")
                 if dZ > threshold: print("UP")
-                elif dZ < -threshold: print("DOWN")'''
+                elif dZ < -threshold: print("DOWN")
                 if abs(dX) > 15 or abs(dZ) > 15:
-                    print(f"FINGER {i} | dX: {int(dX)} dZ: {int(dZ)}")
-
-        #font = cv2.FONT_HERSHEY_SIMPLEX
+                    print(f"FINGER {i} | dX: {int(dX)} dZ: {int(dZ)}")'''
+        text = f"pinky: {cf[0]}, ring: {cf[1]}, middle: {cf[2]}, index: {cf[3]}, thumb: {cf[4]}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
         combined = np.hstack((frame0, frame1))
-        #cv2.putText(combined, text, (20, 35), font, 0.7, (0, 255, 0), 1)
+        cv2.putText(combined, text, (20, 35), font, 0.4, (0, 255, 0), 1)
         cv2.imshow("tracker", cv2.cvtColor(combined, cv2.COLOR_RGB2BGR))
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
